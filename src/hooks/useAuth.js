@@ -2,48 +2,48 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 export function useAuth() {
-  const [session, setSession] = useState(undefined) // undefined = still loading
+  const [session, setSession] = useState(undefined)
 
   useEffect(() => {
-    const hasOAuthCode = window.location.search.includes('code=')
-    let exchangeTimeout
+    console.log('[Auth] URL on load:', window.location.href)
+    console.log('[Auth] Search params:', window.location.search)
+    console.log('[Auth] Hash:', window.location.hash)
 
-    // If we're mid-OAuth-exchange, keep the loading spinner up to 8 seconds
-    // so we don't flash the login screen while supabase-js exchanges the code
-    if (hasOAuthCode) {
-      exchangeTimeout = setTimeout(() => {
-        // Exchange took too long — give up and show login
-        setSession(prev => prev === undefined ? null : prev)
-        window.history.replaceState({}, '', window.location.pathname)
-      }, 8000)
-    }
+    const isOAuthCallback =
+      window.location.search.includes('code=') ||
+      window.location.hash.includes('access_token=')
 
-    // supabase-js handles the PKCE code exchange automatically.
-    // onAuthStateChange fires:
-    //   INITIAL_SESSION → current session (or null if not yet logged in)
-    //   SIGNED_IN       → after the OAuth code exchange completes
+    console.log('[Auth] Is OAuth callback?', isOAuthCallback)
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Ignore the initial null session if we're still waiting on a code exchange
-      if (event === 'INITIAL_SESSION' && session === null && hasOAuthCode) {
+      console.log('[Auth] onAuthStateChange event:', event, '| session:', session?.user?.email ?? null)
+
+      if (event === 'INITIAL_SESSION' && !session && isOAuthCallback) {
+        console.log('[Auth] Suppressing null INITIAL_SESSION during OAuth — waiting for SIGNED_IN')
         return
       }
 
-      clearTimeout(exchangeTimeout)
       setSession(session)
 
-      // Clean ?code=... from the address bar after successful sign-in
       if (event === 'SIGNED_IN') {
         window.history.replaceState({}, '', window.location.pathname)
       }
     })
 
+    // Safety net — stop loading after 10s no matter what
+    const timeout = setTimeout(() => {
+      console.log('[Auth] Timeout hit — forcing session to null')
+      setSession(prev => prev === undefined ? null : prev)
+    }, 10000)
+
     return () => {
       subscription.unsubscribe()
-      clearTimeout(exchangeTimeout)
+      clearTimeout(timeout)
     }
   }, [])
 
   const signInWithGoogle = async () => {
+    console.log('[Auth] Starting Google sign-in, redirectTo:', window.location.origin)
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: window.location.origin },
